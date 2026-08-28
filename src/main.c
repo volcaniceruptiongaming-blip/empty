@@ -95,9 +95,9 @@ int main(void) {
     free(player_png);
     free(enemy_png);
 
-    Rect player = {120, 240, 52, 52};
+    Rect player = {120, 220, 92, 92};
     Rect pickup = {720, 250, 30, 30};
-    Rect enemy = {500, 160, 64, 64};
+    Rect enemy = {500, 145, 112, 112};
 
     float enemy_vx = 3.0f;
     float enemy_vy = 2.2f;
@@ -105,17 +105,23 @@ int main(void) {
     int score = 0;
     int dead = 0;
     int running = 1;
+    int intro = 1;
 
     SceCtrlData pad;
     memset(&pad, 0, sizeof(pad));
+    unsigned int old_buttons = 0;
 
     while (running) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
+        unsigned int pressed = pad.buttons & ~old_buttons;
 
-        if (pad.buttons & SCE_CTRL_START)
+        if (pressed & SCE_CTRL_START)
             running = 0;
 
-        if (!dead) {
+        if (intro) {
+            if (pressed & SCE_CTRL_CROSS)
+                intro = 0;
+        } else if (!dead) {
             float mx = axis_from_stick(pad.lx);
             float my = axis_from_stick(pad.ly);
 
@@ -146,13 +152,13 @@ int main(void) {
 
             if (intersects(player, enemy))
                 dead = 1;
-        } else if (pad.buttons & SCE_CTRL_CROSS) {
+        } else if (pressed & SCE_CTRL_CROSS) {
             player.x = 120;
-            player.y = 240;
+            player.y = 220;
             pickup.x = 720;
             pickup.y = 250;
             enemy.x = 500;
-            enemy.y = 160;
+            enemy.y = 145;
             enemy_vx = 3.0f;
             enemy_vy = 2.2f;
             score = 0;
@@ -162,33 +168,50 @@ int main(void) {
         vita2d_start_drawing();
         vita2d_clear_screen();
 
-        if (player_tex)
-            draw_texture_in_rect(player_tex, player);
-        else
-            vita2d_draw_rectangle(player.x, player.y, player.w, player.h, RGBA8(90, 180, 255, 255));
+        if (intro) {
+            vita2d_draw_rectangle(70, 75, 820, 385, RGBA8(0, 0, 0, 215));
+            vita2d_pgf_draw_text(font, 250, 125, RGBA8(255, 90, 90, 255), 1.5f,
+                                "AVOID JACK AT ALL COSTS");
 
-        vita2d_draw_rectangle(pickup.x, pickup.y, pickup.w, pickup.h, RGBA8(255, 220, 60, 255));
+            vita2d_pgf_draw_text(font, 135, 190, RGBA8(255, 255, 255, 255), 1.0f,
+                                "HE WILL ATTEPMPT TO GET YOU TO");
+            vita2d_pgf_draw_text(font, 270, 235, RGBA8(255, 255, 255, 255), 1.15f,
+                                "PLOP ON HIS CHEST");
+            vita2d_pgf_draw_text(font, 140, 305, RGBA8(255, 220, 60, 255), 1.0f,
+                                "COLLECT ENOUGH GOLD TO ESCAPE HIM");
 
-        if (enemy_tex)
-            draw_texture_in_rect(enemy_tex, enemy);
-        else
-            vita2d_draw_rectangle(enemy.x, enemy.y, enemy.w, enemy.h, RGBA8(240, 70, 80, 255));
+            vita2d_pgf_draw_text(font, 355, 405, RGBA8(190, 200, 220, 255), 1.0f,
+                                "PRESS X TO START");
+        } else {
+            if (player_tex)
+                draw_texture_in_rect(player_tex, player);
+            else
+                vita2d_draw_rectangle(player.x, player.y, player.w, player.h, RGBA8(90, 180, 255, 255));
 
-        char score_text[64];
-        snprintf(score_text, sizeof(score_text), "Score: %d", score);
-        vita2d_pgf_draw_text(font, 24, 38, RGBA8(255, 255, 255, 255), 1.0f, score_text);
+            vita2d_draw_rectangle(pickup.x, pickup.y, pickup.w, pickup.h, RGBA8(255, 220, 60, 255));
 
-        vita2d_pgf_draw_text(font, 24, 520, RGBA8(170, 175, 190, 255), 0.8f,
-                            "Left stick: move   START: quit");
+            if (enemy_tex)
+                draw_texture_in_rect(enemy_tex, enemy);
+            else
+                vita2d_draw_rectangle(enemy.x, enemy.y, enemy.w, enemy.h, RGBA8(240, 70, 80, 255));
 
-        if (dead) {
-            vita2d_draw_rectangle(230, 185, 500, 170, RGBA8(0, 0, 0, 210));
-            vita2d_pgf_draw_text(font, 365, 245, RGBA8(255, 255, 255, 255), 1.4f, "YOU DIED");
-            vita2d_pgf_draw_text(font, 310, 300, RGBA8(255, 255, 255, 255), 1.0f, "Press X to restart");
+            char score_text[64];
+            snprintf(score_text, sizeof(score_text), "Gold: %d", score);
+            vita2d_pgf_draw_text(font, 24, 38, RGBA8(255, 255, 255, 255), 1.0f, score_text);
+
+            vita2d_pgf_draw_text(font, 24, 520, RGBA8(170, 175, 190, 255), 0.8f,
+                                "Left stick: move   START: quit");
+
+            if (dead) {
+                vita2d_draw_rectangle(230, 185, 500, 170, RGBA8(0, 0, 0, 210));
+                vita2d_pgf_draw_text(font, 365, 245, RGBA8(255, 255, 255, 255), 1.4f, "YOU DIED");
+                vita2d_pgf_draw_text(font, 310, 300, RGBA8(255, 255, 255, 255), 1.0f, "Press X to restart");
+            }
         }
 
         vita2d_end_drawing();
         vita2d_swap_buffers();
+        old_buttons = pad.buttons;
     }
 
     if (player_tex) vita2d_free_texture(player_tex);
