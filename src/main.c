@@ -71,7 +71,7 @@ int main(void){
   if(intro){if(pressed&SCE_CTRL_CROSS)intro=0;}
   else if(dead||won){if(pressed&SCE_CTRL_CROSS){reset_game(&player,&vx,&vy,&ground,&dead,&won,&gold,coins,nc,en,ne);cam=0;land_timer=0;}}
   else{
-   float ix=stick_x(pad.lx);vx=ix*MOVE_SPEED;if(ix<-.08f)left=1;else if(ix>.08f)left=0;
+   float ix=stick_x(pad.lx);vx=ix*MOVE_SPEED;if(ix<-.08f)left=0;else if(ix>.08f)left=1;
    if((pressed&SCE_CTRL_CROSS)&&ground){vy=-JUMP_SPEED;ground=0;land_timer=0;}
    player.x+=vx;player.x=clampf(player.x,0,WORLD_W-player.w);
    for(int i=0;i<np;i++)if(intersects(player,platforms[i])){if(vx>0)player.x=platforms[i].x-player.w;else if(vx<0)player.x=platforms[i].x+platforms[i].w;}
