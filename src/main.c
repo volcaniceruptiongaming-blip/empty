@@ -6,14 +6,29 @@
 #include <psp2/kernel/processmgr.h>
 #include <vita2d.h>
 
-#include "assets_b64.h"
-
 #define SCREEN_W 960.0f
 #define SCREEN_H 544.0f
+#define WORLD_W 3600.0f
+#define GRAVITY 0.72f
+#define MOVE_SPEED 4.8f
+#define JUMP_SPEED 13.5f
 
 typedef struct {
     float x, y, w, h;
 } Rect;
+
+typedef struct {
+    Rect r;
+    int collected;
+} Coin;
+
+typedef struct {
+    Rect r;
+    float vx;
+    float min_x;
+    float max_x;
+    int alive;
+} Enemy;
 
 static int intersects(Rect a, Rect b) {
     return a.x < b.x + b.w &&
@@ -28,84 +43,88 @@ static float clampf(float v, float lo, float hi) {
     return v;
 }
 
-static float axis_from_stick(unsigned char value) {
+static float stick_x(unsigned char value) {
     int centered = (int)value - 128;
     if (abs(centered) < 18) return 0.0f;
     return centered / 127.0f;
 }
 
-static int b64_value(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
+static void reset_game(Rect *player, float *vx, float *vy, int *on_ground,
+                       int *dead, int *won, int *coins_collected,
+                       Coin *coins, int coin_count, Enemy *enemies, int enemy_count) {
+    player->x = 120;
+    player->y = 360;
+    *vx = 0;
+    *vy = 0;
+    *on_ground = 0;
+    *dead = 0;
+    *won = 0;
+    *coins_collected = 0;
 
-static unsigned char *decode_base64(const char *src, size_t *out_len) {
-    size_t len = strlen(src);
-    size_t cap = (len * 3) / 4 + 4;
-    unsigned char *out = malloc(cap);
-    if (!out) return NULL;
+    for (int i = 0; i < coin_count; ++i)
+        coins[i].collected = 0;
 
-    size_t oi = 0;
-    int val = 0;
-    int bits = -8;
-
-    for (size_t i = 0; i < len; ++i) {
-        if (src[i] == '=') break;
-        int v = b64_value(src[i]);
-        if (v < 0) continue;
-        val = (val << 6) | v;
-        bits += 6;
-        if (bits >= 0) {
-            out[oi++] = (unsigned char)((val >> bits) & 0xFF);
-            bits -= 8;
-        }
-    }
-
-    *out_len = oi;
-    return out;
-}
-
-static void draw_texture_in_rect(vita2d_texture *tex, Rect r) {
-    if (!tex) return;
-    float tw = (float)vita2d_texture_get_width(tex);
-    float th = (float)vita2d_texture_get_height(tex);
-    vita2d_draw_texture_scale(tex, r.x, r.y, r.w / tw, r.h / th);
+    for (int i = 0; i < enemy_count; ++i)
+        enemies[i].alive = 1;
 }
 
 int main(void) {
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
 
     vita2d_init();
-    vita2d_set_clear_color(RGBA8(20, 22, 30, 255));
-
+    vita2d_set_clear_color(RGBA8(120, 190, 255, 255));
     vita2d_pgf *font = vita2d_load_default_pgf();
 
-    size_t player_png_len = 0;
-    size_t enemy_png_len = 0;
-    unsigned char *player_png = decode_base64(player_png_b64, &player_png_len);
-    unsigned char *enemy_png = decode_base64(enemy_png_b64, &enemy_png_len);
+    Rect player = {120, 360, 52, 66};
+    float player_vx = 0.0f;
+    float player_vy = 0.0f;
+    int on_ground = 0;
 
-    vita2d_texture *player_tex = player_png ? vita2d_load_PNG_buffer(player_png) : NULL;
-    vita2d_texture *enemy_tex = enemy_png ? vita2d_load_PNG_buffer(enemy_png) : NULL;
+    Rect platforms[] = {
+        {0, 470, 900, 74},
+        {980, 470, 520, 74},
+        {1600, 470, 720, 74},
+        {2420, 470, 1180, 74},
+        {420, 385, 180, 28},
+        {760, 320, 180, 28},
+        {1120, 365, 210, 28},
+        {1450, 300, 180, 28},
+        {1800, 365, 210, 28},
+        {2130, 290, 180, 28},
+        {2590, 385, 190, 28},
+        {2920, 320, 180, 28},
+        {3260, 255, 170, 28}
+    };
+    const int platform_count = sizeof(platforms) / sizeof(platforms[0]);
 
-    free(player_png);
-    free(enemy_png);
+    Coin coins[] = {
+        {{470, 345, 24, 24}, 0},
+        {{820, 280, 24, 24}, 0},
+        {{1180, 325, 24, 24}, 0},
+        {{1500, 260, 24, 24}, 0},
+        {{1880, 325, 24, 24}, 0},
+        {{2180, 250, 24, 24}, 0},
+        {{2660, 345, 24, 24}, 0},
+        {{2980, 280, 24, 24}, 0},
+        {{3320, 215, 24, 24}, 0}
+    };
+    const int coin_count = sizeof(coins) / sizeof(coins[0]);
 
-    Rect player = {120, 220, 92, 92};
-    Rect pickup = {720, 250, 30, 30};
-    Rect enemy = {500, 145, 112, 112};
+    Enemy enemies[] = {
+        {{680, 428, 48, 42}, 1.6f, 620, 850, 1},
+        {{1700, 428, 48, 42}, 1.8f, 1650, 2150, 1},
+        {{2760, 428, 48, 42}, 2.0f, 2600, 3200, 1}
+    };
+    const int enemy_count = sizeof(enemies) / sizeof(enemies[0]);
 
-    float enemy_vx = 3.0f;
-    float enemy_vy = 2.2f;
+    Rect goal = {3480, 350, 56, 120};
 
-    int score = 0;
+    int coins_collected = 0;
     int dead = 0;
-    int running = 1;
+    int won = 0;
     int intro = 1;
+    int running = 1;
+    float camera_x = 0.0f;
 
     SceCtrlData pad;
     memset(&pad, 0, sizeof(pad));
@@ -121,91 +140,159 @@ int main(void) {
         if (intro) {
             if (pressed & SCE_CTRL_CROSS)
                 intro = 0;
-        } else if (!dead) {
-            float mx = axis_from_stick(pad.lx);
-            float my = axis_from_stick(pad.ly);
+        } else if (dead || won) {
+            if (pressed & SCE_CTRL_CROSS) {
+                reset_game(&player, &player_vx, &player_vy, &on_ground,
+                           &dead, &won, &coins_collected,
+                           coins, coin_count, enemies, enemy_count);
+                camera_x = 0;
+            }
+        } else {
+            float input_x = stick_x(pad.lx);
+            player_vx = input_x * MOVE_SPEED;
 
-            player.x += mx * 5.5f;
-            player.y += my * 5.5f;
+            if ((pressed & SCE_CTRL_CROSS) && on_ground) {
+                player_vy = -JUMP_SPEED;
+                on_ground = 0;
+            }
 
-            player.x = clampf(player.x, 0, SCREEN_W - player.w);
-            player.y = clampf(player.y, 0, SCREEN_H - player.h);
+            player.x += player_vx;
+            player.x = clampf(player.x, 0, WORLD_W - player.w);
 
-            enemy.x += enemy_vx;
-            enemy.y += enemy_vy;
-
-            if (enemy.x <= 0 || enemy.x + enemy.w >= SCREEN_W)
-                enemy_vx *= -1;
-            if (enemy.y <= 0 || enemy.y + enemy.h >= SCREEN_H)
-                enemy_vy *= -1;
-
-            if (intersects(player, pickup)) {
-                score++;
-                pickup.x = 50 + rand() % 830;
-                pickup.y = 70 + rand() % 410;
-
-                if (score % 3 == 0) {
-                    enemy_vx *= 1.12f;
-                    enemy_vy *= 1.12f;
+            for (int i = 0; i < platform_count; ++i) {
+                if (intersects(player, platforms[i])) {
+                    if (player_vx > 0)
+                        player.x = platforms[i].x - player.w;
+                    else if (player_vx < 0)
+                        player.x = platforms[i].x + platforms[i].w;
                 }
             }
 
-            if (intersects(player, enemy))
+            float old_y = player.y;
+            player_vy += GRAVITY;
+            if (player_vy > 18.0f) player_vy = 18.0f;
+            player.y += player_vy;
+            on_ground = 0;
+
+            for (int i = 0; i < platform_count; ++i) {
+                if (!intersects(player, platforms[i])) continue;
+
+                if (player_vy > 0 && old_y + player.h <= platforms[i].y + 8) {
+                    player.y = platforms[i].y - player.h;
+                    player_vy = 0;
+                    on_ground = 1;
+                } else if (player_vy < 0 && old_y >= platforms[i].y + platforms[i].h - 8) {
+                    player.y = platforms[i].y + platforms[i].h;
+                    player_vy = 0;
+                }
+            }
+
+            if (player.y > SCREEN_H + 140)
                 dead = 1;
-        } else if (pressed & SCE_CTRL_CROSS) {
-            player.x = 120;
-            player.y = 220;
-            pickup.x = 720;
-            pickup.y = 250;
-            enemy.x = 500;
-            enemy.y = 145;
-            enemy_vx = 3.0f;
-            enemy_vy = 2.2f;
-            score = 0;
-            dead = 0;
+
+            for (int i = 0; i < coin_count; ++i) {
+                if (!coins[i].collected && intersects(player, coins[i].r)) {
+                    coins[i].collected = 1;
+                    coins_collected++;
+                }
+            }
+
+            for (int i = 0; i < enemy_count; ++i) {
+                if (!enemies[i].alive) continue;
+
+                enemies[i].r.x += enemies[i].vx;
+                if (enemies[i].r.x <= enemies[i].min_x ||
+                    enemies[i].r.x + enemies[i].r.w >= enemies[i].max_x) {
+                    enemies[i].vx *= -1;
+                }
+
+                if (intersects(player, enemies[i].r)) {
+                    float player_bottom_before = old_y + player.h;
+                    if (player_vy > 0 && player_bottom_before <= enemies[i].r.y + 12) {
+                        enemies[i].alive = 0;
+                        player_vy = -9.0f;
+                    } else {
+                        dead = 1;
+                    }
+                }
+            }
+
+            if (intersects(player, goal) && coins_collected == coin_count)
+                won = 1;
+
+            float target_camera = player.x - 300.0f;
+            camera_x += (target_camera - camera_x) * 0.12f;
+            camera_x = clampf(camera_x, 0, WORLD_W - SCREEN_W);
         }
 
         vita2d_start_drawing();
         vita2d_clear_screen();
 
         if (intro) {
-            vita2d_draw_rectangle(70, 75, 820, 385, RGBA8(0, 0, 0, 215));
-            vita2d_pgf_draw_text(font, 250, 125, RGBA8(255, 90, 90, 255), 1.5f,
-                                "AVOID JACK AT ALL COSTS");
-
-            vita2d_pgf_draw_text(font, 135, 190, RGBA8(255, 255, 255, 255), 1.0f,
-                                "HE WILL ATTEPMPT TO GET YOU TO");
-            vita2d_pgf_draw_text(font, 270, 235, RGBA8(255, 255, 255, 255), 1.15f,
-                                "PLOP ON HIS CHEST");
-            vita2d_pgf_draw_text(font, 140, 305, RGBA8(255, 220, 60, 255), 1.0f,
-                                "COLLECT ENOUGH GOLD TO ESCAPE HIM");
-
-            vita2d_pgf_draw_text(font, 355, 405, RGBA8(190, 200, 220, 255), 1.0f,
+            vita2d_draw_rectangle(100, 80, 760, 360, RGBA8(0, 0, 0, 190));
+            vita2d_pgf_draw_text(font, 250, 145, RGBA8(255, 255, 255, 255), 1.7f,
+                                "PLATFORMER TEST");
+            vita2d_pgf_draw_text(font, 220, 220, RGBA8(235, 235, 235, 255), 1.0f,
+                                "LEFT STICK: MOVE");
+            vita2d_pgf_draw_text(font, 220, 265, RGBA8(235, 235, 235, 255), 1.0f,
+                                "X: JUMP / STOMP ENEMIES");
+            vita2d_pgf_draw_text(font, 220, 310, RGBA8(255, 225, 80, 255), 1.0f,
+                                "COLLECT ALL GOLD AND REACH THE FLAG");
+            vita2d_pgf_draw_text(font, 345, 390, RGBA8(200, 215, 235, 255), 1.0f,
                                 "PRESS X TO START");
         } else {
-            if (player_tex)
-                draw_texture_in_rect(player_tex, player);
-            else
-                vita2d_draw_rectangle(player.x, player.y, player.w, player.h, RGBA8(90, 180, 255, 255));
+            for (int i = 0; i < platform_count; ++i) {
+                float sx = platforms[i].x - camera_x;
+                if (sx + platforms[i].w < 0 || sx > SCREEN_W) continue;
+                vita2d_draw_rectangle(sx, platforms[i].y, platforms[i].w, platforms[i].h,
+                                      RGBA8(90, 175, 75, 255));
+                vita2d_draw_rectangle(sx, platforms[i].y, platforms[i].w, 8,
+                                      RGBA8(65, 125, 55, 255));
+            }
 
-            vita2d_draw_rectangle(pickup.x, pickup.y, pickup.w, pickup.h, RGBA8(255, 220, 60, 255));
+            for (int i = 0; i < coin_count; ++i) {
+                if (coins[i].collected) continue;
+                float sx = coins[i].r.x - camera_x;
+                vita2d_draw_rectangle(sx, coins[i].r.y, coins[i].r.w, coins[i].r.h,
+                                      RGBA8(255, 220, 45, 255));
+            }
 
-            if (enemy_tex)
-                draw_texture_in_rect(enemy_tex, enemy);
-            else
-                vita2d_draw_rectangle(enemy.x, enemy.y, enemy.w, enemy.h, RGBA8(240, 70, 80, 255));
+            for (int i = 0; i < enemy_count; ++i) {
+                if (!enemies[i].alive) continue;
+                float sx = enemies[i].r.x - camera_x;
+                vita2d_draw_rectangle(sx, enemies[i].r.y, enemies[i].r.w, enemies[i].r.h,
+                                      RGBA8(220, 70, 70, 255));
+            }
 
-            char score_text[64];
-            snprintf(score_text, sizeof(score_text), "Gold: %d", score);
-            vita2d_pgf_draw_text(font, 24, 38, RGBA8(255, 255, 255, 255), 1.0f, score_text);
+            float gx = goal.x - camera_x;
+            vita2d_draw_rectangle(gx, goal.y, 8, goal.h, RGBA8(230, 230, 230, 255));
+            vita2d_draw_rectangle(gx + 8, goal.y, 48, 34,
+                                  coins_collected == coin_count ? RGBA8(80, 220, 110, 255)
+                                                                : RGBA8(130, 130, 130, 255));
 
-            vita2d_pgf_draw_text(font, 24, 520, RGBA8(170, 175, 190, 255), 0.8f,
-                                "Left stick: move   START: quit");
+            float px = player.x - camera_x;
+            vita2d_draw_rectangle(px, player.y, player.w, player.h, RGBA8(70, 105, 235, 255));
+
+            char hud[96];
+            snprintf(hud, sizeof(hud), "GOLD %d/%d", coins_collected, coin_count);
+            vita2d_pgf_draw_text(font, 24, 38, RGBA8(255, 255, 255, 255), 1.0f, hud);
+            vita2d_pgf_draw_text(font, 720, 38, RGBA8(255, 255, 255, 255), 0.8f,
+                                "START: quit");
 
             if (dead) {
-                vita2d_draw_rectangle(230, 185, 500, 170, RGBA8(0, 0, 0, 210));
-                vita2d_pgf_draw_text(font, 365, 245, RGBA8(255, 255, 255, 255), 1.4f, "YOU DIED");
-                vita2d_pgf_draw_text(font, 310, 300, RGBA8(255, 255, 255, 255), 1.0f, "Press X to restart");
+                vita2d_draw_rectangle(245, 185, 470, 170, RGBA8(0, 0, 0, 215));
+                vita2d_pgf_draw_text(font, 370, 245, RGBA8(255, 100, 100, 255), 1.5f,
+                                    "YOU DIED");
+                vita2d_pgf_draw_text(font, 325, 305, RGBA8(255, 255, 255, 255), 1.0f,
+                                    "PRESS X TO RESTART");
+            }
+
+            if (won) {
+                vita2d_draw_rectangle(210, 170, 540, 190, RGBA8(0, 0, 0, 215));
+                vita2d_pgf_draw_text(font, 315, 235, RGBA8(255, 225, 80, 255), 1.5f,
+                                    "LEVEL COMPLETE!");
+                vita2d_pgf_draw_text(font, 320, 305, RGBA8(255, 255, 255, 255), 1.0f,
+                                    "PRESS X TO PLAY AGAIN");
             }
         }
 
@@ -214,8 +301,6 @@ int main(void) {
         old_buttons = pad.buttons;
     }
 
-    if (player_tex) vita2d_free_texture(player_tex);
-    if (enemy_tex) vita2d_free_texture(enemy_tex);
     vita2d_free_pgf(font);
     vita2d_fini();
     sceKernelExitProcess(0);
