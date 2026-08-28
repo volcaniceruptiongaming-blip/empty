@@ -1,0 +1,4 @@
+#ifndef PLAYER_ATLAS_GENERATED_H
+#define PLAYER_ATLAS_GENERATED_H
+static const char player_atlas_png_b64[] = "@PLAYER_ATLAS_B64@";
+#endif
