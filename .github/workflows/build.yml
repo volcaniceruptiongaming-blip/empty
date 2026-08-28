@@ -19,7 +19,8 @@ jobs:
         shell: bash
         run: |
           set -eux
-          apk add --no-cache git cmake make bash wget tar xz p7zip patch
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y git cmake make bash wget tar xz-utils p7zip-full patch
           git clone --depth 1 https://github.com/vitasdk/vdpm.git /tmp/vdpm
           export VITASDK=/usr/local/vitasdk
           export PATH="$VITASDK/bin:$PATH"
