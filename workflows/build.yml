@@ -1,0 +1,48 @@
+name: Build Vita VPK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: vitasdk/vitasdk:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install vita2d dependencies
+        shell: bash
+        run: |
+          set -eux
+          apk add --no-cache git cmake make bash wget tar xz p7zip patch
+          git clone --depth 1 https://github.com/vitasdk/vdpm.git /tmp/vdpm
+          export VITASDK=/usr/local/vitasdk
+          export PATH="$VITASDK/bin:$PATH"
+          cd /tmp/vdpm
+          ./vdpm zlib
+          ./vdpm libpng
+          ./vdpm libjpeg-turbo
+          ./vdpm freetype
+          ./vdpm libvita2d
+
+      - name: Build VPK
+        shell: bash
+        run: |
+          set -eux
+          export VITASDK=/usr/local/vitasdk
+          export PATH="$VITASDK/bin:$PATH"
+          cmake -S . -B build
+          cmake --build build -j2
+          test -f build/VitaPNGGame.vpk
+
+      - name: Upload VPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VitaPNGGame-VPK
+          path: build/VitaPNGGame.vpk
+          if-no-files-found: error
