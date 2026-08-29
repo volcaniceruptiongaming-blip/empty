@@ -7,6 +7,7 @@
 #include <vita2d.h>
 #include "sprite_idle0.h"
 #include "player_atlas.h"
+#include "start_menu.h"
 
 #define SCREEN_W 960.0f
 #define SCREEN_H 544.0f
@@ -34,6 +35,7 @@ static unsigned char *decode64(const char *s,size_t *outn){
  *outn=oi; return out;
 }
 static vita2d_texture *load64(const char *s){ size_t n=0; unsigned char *p=decode64(s,&n); if(!p)return NULL; vita2d_texture *t=vita2d_load_PNG_buffer(p); free(p); return t; }
+static vita2d_texture *load64_jpeg(const char *s){ size_t n=0; unsigned char *p=decode64(s,&n); if(!p)return NULL; vita2d_texture *t=vita2d_load_JPEG_buffer(p); free(p); return t; }
 
 static void draw_fallback(vita2d_texture *t,Rect p,float cam,int left){
  if(!t)return;
@@ -60,7 +62,7 @@ static void reset_game(Rect *p,float *vx,float *vy,int *ground,int *dead,int *wo
 int main(void){
  sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);vita2d_init();vita2d_set_clear_color(RGBA8(120,190,255,255));
  vita2d_pgf *font=vita2d_load_default_pgf();
- vita2d_texture *atlas=load64(player_atlas_png_b64);vita2d_texture *fallback=load64(idle0_png_b64);
+ vita2d_texture *atlas=load64(player_atlas_png_b64);vita2d_texture *fallback=load64(idle0_png_b64);vita2d_texture *menu=load64_jpeg(start_menu_jpg_b64);
  Rect player={120,360,52,66};float vx=0,vy=0;int ground=0;
  Rect platforms[]={{0,470,900,74},{980,470,520,74},{1600,470,720,74},{2420,470,1180,74},{420,385,180,28},{760,320,180,28},{1120,365,210,28},{1450,300,180,28},{1800,365,210,28},{2130,290,180,28},{2590,385,190,28},{2920,320,180,28},{3260,255,170,28}};
  const int np=sizeof(platforms)/sizeof(platforms[0]);
@@ -84,7 +86,11 @@ int main(void){
    if(intersects(player,goal)&&gold==nc)won=1;float target=player.x-300;cam+=(target-cam)*.12f;cam=clampf(cam,0,WORLD_W-SCREEN_W);
   }
   vita2d_start_drawing();vita2d_clear_screen();
-  if(intro){vita2d_draw_rectangle(100,80,760,360,RGBA8(0,0,0,190));vita2d_pgf_draw_text(font,250,145,RGBA8(255,255,255,255),1.7f,"PLATFORMER TEST");vita2d_pgf_draw_text(font,220,220,RGBA8(235,235,235,255),1.0f,"LEFT STICK: MOVE");vita2d_pgf_draw_text(font,220,265,RGBA8(235,235,235,255),1.0f,"X: JUMP / STOMP ENEMIES");vita2d_pgf_draw_text(font,345,390,RGBA8(200,215,235,255),1.0f,"PRESS X TO START");}
+  if(intro){
+   if(menu)vita2d_draw_texture_scale(menu,0,0,2.0f,2.0f);else vita2d_draw_rectangle(0,0,SCREEN_W,SCREEN_H,RGBA8(20,20,20,255));
+   vita2d_draw_rectangle(0,475,960,69,RGBA8(0,0,0,180));
+   vita2d_pgf_draw_text(font,358,520,RGBA8(255,255,255,255),1.25f,"PRESS X TO START");
+  }
   else{
    for(int i=0;i<np;i++){float x=platforms[i].x-cam;if(x+platforms[i].w<0||x>SCREEN_W)continue;vita2d_draw_rectangle(x,platforms[i].y,platforms[i].w,platforms[i].h,RGBA8(90,175,75,255));vita2d_draw_rectangle(x,platforms[i].y,platforms[i].w,8,RGBA8(65,125,55,255));}
    for(int i=0;i<nc;i++)if(!coins[i].collected)vita2d_draw_rectangle(coins[i].r.x-cam,coins[i].r.y,coins[i].r.w,coins[i].r.h,RGBA8(255,220,45,255));
@@ -97,5 +103,5 @@ int main(void){
   }
   vita2d_end_drawing();vita2d_swap_buffers();old=pad.buttons;
  }
- if(atlas)vita2d_free_texture(atlas);if(fallback)vita2d_free_texture(fallback);vita2d_free_pgf(font);vita2d_fini();sceKernelExitProcess(0);return 0;
+ if(menu)vita2d_free_texture(menu);if(atlas)vita2d_free_texture(atlas);if(fallback)vita2d_free_texture(fallback);vita2d_free_pgf(font);vita2d_fini();sceKernelExitProcess(0);return 0;
 }
